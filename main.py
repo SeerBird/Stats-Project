@@ -50,7 +50,6 @@ f_bg,x_bg=function_hist(BG,104, 155) #f_bg height of background bins, x_bg bin e
 
 #calculating lambda
 lamb=np.average(BG)
-print(np.average(bin_heights*len(vals)))
 
 #calculating the prefactor
 #integral_data=(np.sum(f_bg*len(BG)))

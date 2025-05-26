@@ -27,8 +27,8 @@ def background_model(_A, _a, _E: float | np.ndarray):
     return _A * np.exp(-_E / _a)
 
 
-def trapezium_integral_vectorized(xarray: np.ndarray,
-                                  func):
+def trapezium_integrate(xarray: np.ndarray,
+                        func):
     """
     :param xarray: ordered(descending or ascending) array of xvalues at which the function will be evaluated
     :param func: vectorizable function float->float
@@ -39,34 +39,40 @@ def trapezium_integral_vectorized(xarray: np.ndarray,
 
 
 def get_hist(_vals: np.ndarray, _start: float, _end: float, _bins: int):
-    _bin_heights, _bin_edges = np.histogram(_vals, np.linspace(_start, _end, _bins))
+    """
+    :param _vals: array of values to put into bins
+    :param _start: low edge of first bin
+    :param _end: high edge of last bin
+    :param _bins: number of bins
+    :return: tuple containing the array of values per bin(bin heights) and the array of bin middle positions
+    """
+    _bin_heights, _bin_edges = np.histogram(_vals, np.linspace(_start, _end, _bins+1))
     return _bin_heights, (_bin_edges[1:] + _bin_edges[:-1]) / 2
 
 
 data = np.asarray(STOM_higgs_tools.generate_data())
 plot_start = 104
 plot_end = 155
-with_signal = data
 signal_start = 120
 signal_end = 130
-without_signal = with_signal[(with_signal < signal_start) | (with_signal > signal_end)]
-with_signal = data[(data > plot_start) & (data < plot_end)]
+without_signal = data[(data < signal_start) | (data > signal_end)]
+with_signal = data[(data > plot_start) & (data < plot_end)]  # only fit the relevant region? #TODO: is this correct?
 nbins = 30
 # region Task 1&2
-max_lik_a = np.average(without_signal)  # get the second parameter of the background model - a
-
-bin_heights, binx = get_hist(without_signal, plot_start, plot_end, nbins + 1)
-integral_without_signal = np.sum((bin_heights[1:] + bin_heights[:-1]) * (binx[1:] - binx[:-1]) / 2)
-trial_model = lambda _x: background_model(1, max_lik_a, _x)  # set A to 1 and a to the value we got earlier
-integral_func = (trapezium_integral_vectorized(np.linspace(plot_start, signal_start), trial_model) +
-                 trapezium_integral_vectorized(np.linspace(signal_end, plot_end), trial_model))  # exclude the signal
-max_lik_A = integral_without_signal / integral_func  # get the first parameter of the background model - A
-print(f"Max-likelihood fit: A = {max_lik_A:.4f}, a = {max_lik_a:.4f}")
 # region plot generated data
-bin_heights, binx = get_hist(with_signal, plot_start, plot_end, nbins + 1)
+bin_heights, binx = get_hist(with_signal, plot_start, plot_end, nbins)
 plt.errorbar(binx, bin_heights, np.sqrt(bin_heights),
              ls="none", marker='o', markersize=2.5, capsize=1, elinewidth=1, label='Data', color='black')
 # endregion
+max_lik_a = np.average(without_signal)  # get the second parameter of the background model - a
+
+bin_heights, binx = get_hist(without_signal, plot_start, plot_end, nbins)
+integral_without_signal = np.sum((bin_heights[1:] + bin_heights[:-1]) * (binx[1:] - binx[:-1]) / 2)
+trial_model = lambda _x: background_model(1, max_lik_a, _x)  # set A to 1 and a to the value we got earlier
+integral_trial_model = (trapezium_integrate(np.linspace(plot_start, signal_start), trial_model) +
+                        trapezium_integrate(np.linspace(signal_end, plot_end), trial_model))  # exclude the signal
+max_lik_A = integral_without_signal / integral_trial_model  # get the first parameter of the background model - A
+print(f"Max-likelihood fit: A = {max_lik_A:.4f}, a = {max_lik_a:.4f}")
 # region plot max-likelihood fit
 x = np.linspace(plot_start, plot_end, 1000)
 plt.plot(x, background_model(max_lik_A, max_lik_a, x), label='Maximum likelihood')
@@ -76,18 +82,24 @@ plt.plot(x, background_model(max_lik_A, max_lik_a, x), label='Maximum likelihood
 # endregion
 # region Task 3
 def chi2(_x: np.ndarray, _y: np.ndarray, _ysig, func):
+    """
+    :param _x: data x values
+    :param _y: data y values
+    :param _ysig: data y uncertainties
+    :param func: function to get the chi^2 value for
+    :return: chi^2 value for given data and function
+    """
     return np.sum(((_y - func(_x)) / _ysig) ** 2, axis=0)
 
 
 def least_chi2_fit_A_and_a(A_values, a_values, _binx, _bin_heights, model):
     """
-
-    :param A_values:
-    :param a_values:
-    :param _bin_heights:
-    :param _binx:
-    :param model:
-    :return:
+    :param A_values: 1-D array of A values to check
+    :param a_values: 1-D array of a values to check
+    :param _binx: data x values
+    :param _bin_heights: data y values
+    :param model: the model to fit,  (A_values, a_values, _binx)->(model y values)
+    :return: best A value, best a value, the chi^2 value achieved with those A and a values
     """
     param_mesh = np.meshgrid(A_values, a_values, indexing="ij")
     trial_funcs = lambda _x: model(param_mesh[0], param_mesh[1], _x)
@@ -99,8 +111,8 @@ def least_chi2_fit_A_and_a(A_values, a_values, _binx, _bin_heights, model):
 
 
 # background-only hypothesis without signal region
-heights_without_signal, binx_without_signal = get_hist(with_signal, np.min(with_signal), np.max(with_signal), nbins + 1)
-heights_without_signal = heights_without_signal[
+heights_without_signal, binx_without_signal = get_hist(with_signal, np.min(with_signal), np.max(with_signal), nbins)
+heights_without_signal = heights_without_signal[  # only take bins outside the signal region
     (binx_without_signal < signal_start) | (binx_without_signal > signal_end)]
 binx_without_signal = binx_without_signal[(binx_without_signal < signal_start) | (binx_without_signal > signal_end)]
 # region remove zero-height binx
@@ -135,10 +147,11 @@ def chi2_PDF(_chi2: np.ndarray | float, dof: int):
     k_over_2 = float(dof) / 2
     try:
         result[_chi2 < 10 * dof] = smallchi2 ** (k_over_2 - 1) * np.exp(-smallchi2 / 2) / (
-                    (2 ** k_over_2) * gamma(k_over_2))
-    except RuntimeWarning as e:
+                (2 ** k_over_2) * gamma(k_over_2))
+    except RuntimeWarning:
         print(
-            "Overflow encountered when trying to compute the chi2 PDF, returned zero instead - consider making a better fit...")
+            "Overflow encountered when trying to compute the chi2 PDF, returned zeros instead"
+            " - consider making a better fit...")
     return result
 
 
@@ -150,18 +163,19 @@ def p_from_chi2(_chi2: float | np.ndarray, dof: int):
     """
     if dof <= 1:
         return -1  # don't care
-    return 1 - trapezium_integral_vectorized(np.linspace(0, _chi2, 10000),  # whatever number
-                                             lambda _x: chi2_PDF(_x, dof))
+    return 1 - trapezium_integrate(np.linspace(0, _chi2, 10000),  # whatever number
+                                   lambda _x: chi2_PDF(_x, dof))
 
 
 # region examine the background-only chi2 fit without signal region now that we can
-p_background = p_from_chi2(background_fit_chi2, len(heights_without_signal) - 2)
+p_background_without_signal = p_from_chi2(background_fit_chi2, len(heights_without_signal) - 2)
 print(
-    f"Background-only chi^2 fit without signal region: A = {best_chi2_A:.4f}, a = {best_chi2_a:.4f}, p = {p_background}")
+    f"Background-only chi^2 fit without signal region: A = {best_chi2_A:.4f}, a = {best_chi2_a:.4f},"
+    f" p = {p_background_without_signal:.4f}")
 # endregion
 # region background-only hypothesis with signal region
 
-heights_with_signal, binx_with_signal = get_hist(with_signal, np.min(with_signal), np.max(with_signal), nbins + 1)
+heights_with_signal, binx_with_signal = get_hist(with_signal, np.min(with_signal), np.max(with_signal), nbins)
 # region remove zero-height bins to avoid dealing with division by zero
 binx_with_signal = binx_with_signal[heights_with_signal != 0]
 heights_with_signal = heights_with_signal[heights_with_signal != 0]
@@ -171,8 +185,9 @@ best_chi2_A, best_chi2_a, least_chi2 = least_chi2_fit_A_and_a(np.linspace(50000,
                                                               binx_with_signal,
                                                               heights_with_signal,
                                                               background_model)
-p_background = p_from_chi2(least_chi2, len(heights_with_signal) - 2)
-print(f"Background-only chi^2 fit with signal region: A = {best_chi2_A:.4f}, a = {best_chi2_a:.4f}, p = {p_background}")
+p_background_with_signal = p_from_chi2(least_chi2, len(heights_with_signal) - 2)
+print(f"Background-only chi^2 fit with signal region: A = {best_chi2_A:.4f}, a = {best_chi2_a:.4f},"
+      f" p = {p_background_with_signal:.2E}")
 
 
 # endregion
@@ -186,9 +201,10 @@ best_chi2_A, best_chi2_a, gaussian_chi2 = least_chi2_fit_A_and_a(np.linspace(500
                                                                  binx_with_signal,
                                                                  heights_with_signal,
                                                                  gaussian_assumption)
+p_gaussian_assumption = p_from_chi2(gaussian_chi2, len(heights_with_signal) - 2)
 # endregion
 print(f"Gaussian assumption chi^2 fit: A = {best_chi2_A:.4f}," +
-      f" a = {best_chi2_a:.4f}, p = {p_from_chi2(gaussian_chi2, len(heights_with_signal) - 2)}")
+      f" a = {best_chi2_a:.4f}, p = {p_gaussian_assumption:.4f}")
 # region plot chi2 gaussian assumption fit
 x = np.linspace(plot_start, plot_end, 1000)
 plt.plot(x, background_and_signal_model((best_chi2_A, best_chi2_a, 700, 125, 1.5), x),

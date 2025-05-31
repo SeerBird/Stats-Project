@@ -213,76 +213,62 @@ plt.plot(x, background_and_signal_model((best_chi2_A, best_chi2_a, 700, 125, 1.5
 # endregion
 
 # region Task 4c
-# Extract background-only fit results from Task 3
-A0 = best_chi2_A  # Background amplitude from full-range fit
-a0 = best_chi2_a  # Background slope from full-range fit
+# Fixed signal parameters (Higgs peak)
+mu_signal = 125.0    # GeV (Higgs mass)
+sigma_signal = 1.5   # GeV (detector resolution)
 
-# Recalculate background chi-squared for the full range
-model_background = lambda x: background_model(A0, a0, x)
-chi2_B = chi2(binx_with_signal, heights_with_signal, np.sqrt(heights_with_signal), model_background)
+# Generating a range of amplitudes 
+A_signal_values = np.linspace(230, 260, 21)  
 
-# Function to calculate p-value for a given signal amplitude
-def get_p_value(A_signal):
-    """Calculate p-value for given signal amplitude"""
-    # Signal+background model with fixed signal parameters
-    def sb_model(A, a, x):
-        return background_and_signal_model((A, a, A_signal, 125, 1.5), x)
+# Arrays to store results
+chi2_values = []
+p_values = []
+fitted_A_values = []
+fitted_a_values = []
+
+# Loop over signal amplitudes
+for A_signal in A_signal_values:
+    # Define the model with CURRENT A_signal 
+    def current_model(A_background, a, E):
+        background = A_background * np.exp(-E / a)
+        signal = A_signal * np.exp(-(E - mu_signal)**2 / (2 * sigma_signal**2)) / (np.sqrt(2 * np.pi) * sigma_signal)
+        return background + signal
     
-    # Fit signal+background model (vary background parameters only)
-    A1, a1, chi2_SB = least_chi2_fit_A_and_a(
-        np.linspace(A0-1000, A0+1000, 50),  # Search near background fit
-        np.linspace(a0-1, a0+1, 50),        # Search near background fit
-        binx_with_signal,
-        heights_with_signal,
-        sb_model
+    # Fit background parameters (A, a) for this fixed A_signal
+    fit_A, fit_a, current_chi2 = least_chi2_fit_A_and_a(
+        np.linspace(50000, 70000, 100),  # A_background range
+        np.linspace(20, 40, 100),        # a range
+        binx_with_signal,                 # Energy bin centers
+        heights_with_signal,              # Observed counts
+        current_model                     # Model with frozen A_signal
     )
     
-    # Calculate test statistic (Delta chi-squared)
-    D = chi2_B - chi2_SB
-    if D < 0:  # Shouldn't happen but safeguard
-        return 1.0
-    return 1 - chi2_dist.cdf(D, df=1)  # p-value (1 DOF difference)
-
-# Binary search for amplitude that gives p=0.05
-low_amp, high_amp = 100, 1000  # Start with wider range based on Gaussian fit
-tolerance = 1.0  # Larger tolerance for faster convergence
-max_iter = 15
-required_amp = 0
-
-for i in range(max_iter):
-    mid_amp = (low_amp + high_amp) / 2
-    p_mid = get_p_value(mid_amp)
+    # Compute p-value (degrees of freedom = nbins - 2 fitted params)
+    current_p = p_from_chi2(current_chi2, len(heights_with_signal) - 2)
     
-    print(f"Iter {i+1}: A_sig={mid_amp:.1f}, p={p_mid:.6f}")
+    # Store results
+    chi2_values.append(current_chi2)
+    p_values.append(current_p)
+    fitted_A_values.append(fit_A)
+    fitted_a_values.append(fit_a)
     
-    if abs(p_mid - 0.05) < 0.005:  # Slightly wider tolerance
-        required_amp = mid_amp
-        break
-    elif p_mid < 0.05:
-        high_amp = mid_amp
-    else:
-        low_amp = mid_amp
-        
-    if high_amp - low_amp < tolerance:
-        required_amp = (low_amp + high_amp) / 2
-        break
+    print(f"A_signal = {A_signal:6.1f}: χ² = {current_chi2:6.1f}, p = {current_p:.5f}")
 
-print(f"\nSignal amplitude for p=0.05: {required_amp:.1f}")
+# Find the index of the p-value closest to p=0.05
+p_diff = [abs(p - 0.05) for p in p_values]
+min_p_diff = min(p_diff)
+index_closest = p_diff.index(min_p_diff)
 
-x = np.linspace(plot_start, plot_end, 1000)
-# Get final fit parameters for the required amplitude
-def sb_final_model(A, a, x):
-    return background_and_signal_model((A, a, required_amp, 125, 1.5), x)
+A_signal_closest = A_signal_values[index_closest]
+p_closest = p_values[index_closest]
+chi2_closest = chi2_values[index_closest]
+A_closest = fitted_A_values[index_closest]
+a_closest = fitted_a_values[index_closest]
 
-A_final, a_final, _ = least_chi2_fit_A_and_a(
-    np.linspace(A0-1000, A0+1000, 50),
-    np.linspace(a0-1, a0+1, 50),
-    binx_with_signal,
-    heights_with_signal,
-    sb_final_model
-)
-
+print(f"Closest to p=0.05: A_signal = {A_signal_closest:.1f}, χ² = {chi2_closest:.1f}, p = {p_closest:.5f}")
 # endregion
+
+x = np.linspace(100, 150, 1000)
 
 # region prettify plot
 plt.title('Discovery of the Higgs Boson yay')
@@ -290,7 +276,7 @@ plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
 plt.ylabel('Number of entries')
 plt.xticks([120, 140])
 plt.yticks(np.arange(0, 2200, 200))
-plt.plot(x, background_and_signal_model((A_final, a_final, required_amp, 125, 1.5), x),
+plt.plot(x, background_and_signal_model((A_closest, a_closest, A_signal_closest, 125, 1.5), x),
          'r--', label=f'p=0.05 fit')
 plt.legend()
 plt.show()

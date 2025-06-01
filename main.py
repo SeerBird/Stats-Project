@@ -1,6 +1,7 @@
 import STOM_higgs_tools, numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import gamma
+from scipy.stats import chi2 as chi2_dist
 import warnings
 
 warnings.filterwarnings("error")
@@ -46,7 +47,7 @@ def get_hist(_vals: np.ndarray, _start: float, _end: float, _bins: int):
     :param _bins: number of bins
     :return: tuple containing the array of values per bin(bin heights) and the array of bin middle positions
     """
-    _bin_heights, _bin_edges = np.histogram(_vals, np.linspace(_start, _end, _bins+1))
+    _bin_heights, _bin_edges = np.histogram(_vals, np.linspace(_start, _end, _bins + 1))
     return _bin_heights, (_bin_edges[1:] + _bin_edges[:-1]) / 2
 
 
@@ -58,6 +59,9 @@ signal_end = 130
 without_signal = data[(data < signal_start) | (data > signal_end)]
 with_signal = data[(data > plot_start) & (data < plot_end)]  # only fit the relevant region? #TODO: is this correct?
 nbins = 30
+gaussian_assumption_A = 700
+gaussian_assumption_mu = 125
+gaussian_assumption_sigma = 1.5
 # region Task 1&2
 # region plot generated data
 bin_heights, binx = get_hist(with_signal, plot_start, plot_end, nbins)
@@ -92,15 +96,15 @@ def chi2(_x: np.ndarray, _y: np.ndarray, _ysig, func):
     return np.sum(((_y - func(_x)) / _ysig) ** 2, axis=0)
 
 
-def least_chi2_fit_A_and_a(A_values, a_values, _binx, _bin_heights, model):
+def scan_param_ranges(A_values, a_values, _binx, _bin_heights, model):
     """
-    :param A_values: 1-D array of A values to check
-    :param a_values: 1-D array of a values to check
-    :param _binx: data x values
-    :param _bin_heights: data y values
-    :param model: the model to fit,  (A_values, a_values, _binx)->(model y values)
-    :return: best A value, best a value, the chi^2 value achieved with those A and a values
-    """
+        :param A_values: values of A to check
+        :param a_values: values of a to check
+        :param _binx: data x values
+        :param _bin_heights: data y values
+        :param model: the model to fit,  (A_values, a_values, _binx)->(model y values)
+        :return: best A value, best a value, the chi^2 value achieved with those A and a values
+        """
     param_mesh = np.meshgrid(A_values, a_values, indexing="ij")
     trial_funcs = lambda _x: model(param_mesh[0], param_mesh[1], _x)
 
@@ -108,6 +112,31 @@ def least_chi2_fit_A_and_a(A_values, a_values, _binx, _bin_heights, model):
     chi2s = chi2(_binx[:, None, None], _bin_heights[:, None, None], np.sqrt(_bin_heights)[:, None, None], trial_funcs)
     fit_index = np.unravel_index(np.argmin(chi2s, axis=None), shape=chi2s.shape)
     return param_mesh[0][fit_index], param_mesh[1][fit_index], chi2s[fit_index]
+
+
+def least_chi2_fit_A_and_a(A_min, A_max, a_min, a_max, _binx, _bin_heights, model):
+    """
+    :param A_min: minimum A value to scan
+    :param A_max: maximum A value to scan
+    :param a_min: minimum a value to scan
+    :param a_max: maximum a value to scan
+    :param _binx: data x values
+    :param _bin_heights: data y values
+    :param model: the model to fit,  (A_values, a_values, _binx)->(model y values)
+    :return: best A value, best a value, the chi^2 value achieved with those A and a values
+    """
+    _best_A, _best_a, _best_chi2 = ((A_min + A_max) / 2, (a_min + a_max) / 2, 0)
+    checknum = 10  # number of values to check per range
+    _iter = 5
+    for _i in range(_iter):
+        _best_A, _best_a, _best_chi2 = scan_param_ranges(np.linspace(A_min, A_max, checknum),
+                                                         np.linspace(a_min, a_max, checknum),
+                                                         _binx, _bin_heights, model)
+        A_min = _best_A - (A_max - A_min) / checknum
+        A_max = _best_A + (A_max - A_min) / checknum
+        a_min = _best_a - (a_max - a_min) / checknum
+        a_max = _best_a + (a_max - a_min) / checknum
+    return _best_A, _best_a, _best_chi2
 
 
 # background-only hypothesis without signal region
@@ -119,8 +148,7 @@ binx_without_signal = binx_without_signal[(binx_without_signal < signal_start) |
 binx_without_signal = binx_without_signal[heights_without_signal != 0]
 heights_without_signal = heights_without_signal[heights_without_signal != 0]
 # endregion
-best_chi2_A, best_chi2_a, background_fit_chi2 = least_chi2_fit_A_and_a(np.linspace(50000, 60000, 100),
-                                                                       np.linspace(28, 31, 100),
+best_chi2_A, best_chi2_a, background_fit_chi2 = least_chi2_fit_A_and_a(50000, 70000, 28, 31,
                                                                        binx_without_signal,
                                                                        heights_without_signal,
                                                                        background_model)
@@ -134,6 +162,7 @@ plt.plot(x, background_model(best_chi2_A, best_chi2_a, x),
 
 # endregion
 # region Task 4
+# region a
 def chi2_PDF(_chi2: np.ndarray | float, dof: int):
     """
     The probability distribution of chi^2 of a fit given its number of degrees of freedom
@@ -161,10 +190,7 @@ def p_from_chi2(_chi2: float | np.ndarray, dof: int):
     :param dof: the number of degrees of freedom for your fit
     :return: p-value of your fit
     """
-    if dof <= 1:
-        return -1  # don't care
-    return 1 - trapezium_integrate(np.linspace(0, _chi2, 10000),  # whatever number
-                                   lambda _x: chi2_PDF(_x, dof))
+    return 1 - chi2_dist.cdf(_chi2,df = dof)
 
 
 # region examine the background-only chi2 fit without signal region now that we can
@@ -180,8 +206,8 @@ heights_with_signal, binx_with_signal = get_hist(with_signal, np.min(with_signal
 binx_with_signal = binx_with_signal[heights_with_signal != 0]
 heights_with_signal = heights_with_signal[heights_with_signal != 0]
 # endregion
-best_chi2_A, best_chi2_a, least_chi2 = least_chi2_fit_A_and_a(np.linspace(50000, 70000, 100),
-                                                              np.linspace(28, 31, 100),
+best_chi2_A, best_chi2_a, least_chi2 = least_chi2_fit_A_and_a(50000, 70000,
+                                                              28, 31,
                                                               binx_with_signal,
                                                               heights_with_signal,
                                                               background_model)
@@ -191,13 +217,16 @@ print(f"Background-only chi^2 fit with signal region: A = {best_chi2_A:.4f}, a =
 
 
 # endregion
+# endregion
+# region b
 # region gaussian assumption
 def gaussian_assumption(A, a, _E):
-    return background_and_signal_model((A, a, 700, 125, 1.5), _E)
+    return background_and_signal_model((A, a, gaussian_assumption_A, gaussian_assumption_mu,
+                                        gaussian_assumption_sigma), _E)
 
 
-best_chi2_A, best_chi2_a, gaussian_chi2 = least_chi2_fit_A_and_a(np.linspace(50000, 70000, 1000),
-                                                                 np.linspace(20, 40, 1000),
+best_chi2_A, best_chi2_a, gaussian_chi2 = least_chi2_fit_A_and_a(50000, 70000,
+                                                                 25, 35,
                                                                  binx_with_signal,
                                                                  heights_with_signal,
                                                                  gaussian_assumption)
@@ -207,17 +236,23 @@ print(f"Gaussian assumption chi^2 fit: A = {best_chi2_A:.4f}," +
       f" a = {best_chi2_a:.4f}, p = {p_gaussian_assumption:.4f}")
 # region plot chi2 gaussian assumption fit
 x = np.linspace(plot_start, plot_end, 1000)
-plt.plot(x, background_and_signal_model((best_chi2_A, best_chi2_a, 700, 125, 1.5), x),
+plt.plot(x, background_and_signal_model((best_chi2_A, best_chi2_a, gaussian_assumption_A,
+                                         gaussian_assumption_mu, gaussian_assumption_sigma), x),
          label=r"Least $\chi^2$ gaussian assumption fit")
+
+
+# endregion
+# endregion
 # endregion
 # endregion
 # region prettify plot
-plt.title('Discovery of the Higgs Boson')
-plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
-plt.ylabel('Number of entries')
+plt.title('Discovery of the Higgs Boson', fontsize=16)
+plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)', fontsize=14)
+plt.ylabel('Number of entries', fontsize=14)
 plt.xticks([120, 140])
 plt.minorticks_on()
 plt.yticks(np.arange(0, 2200, 200))
-plt.legend()
+plt.legend(fontsize=12)
+plt.tight_layout()
 plt.show()
 # endregion

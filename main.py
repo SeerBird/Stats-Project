@@ -75,7 +75,7 @@ max_lik_A = integral_without_signal / integral_trial_model  # get the first para
 print(f"Max-likelihood fit: A = {max_lik_A:.4f}, a = {max_lik_a:.4f}")
 # region plot max-likelihood fit
 x = np.linspace(plot_start, plot_end, 1000)
-plt.plot(x, background_model(max_lik_A, max_lik_a, x), label='Maximum likelihood')
+plt.plot(x, background_model(max_lik_A, max_lik_a, x), label='Maximum likelihood fit')
 
 
 # endregion
@@ -212,10 +212,11 @@ plt.plot(x, background_and_signal_model((best_chi2_A, best_chi2_a, 700, 125, 1.5
 # endregion
 # endregion
 # region prettify plot
-plt.title('Discovery of the Higgs Boson yay')
+plt.title('Discovery of the Higgs Boson')
 plt.xlabel(r'$m_{\gamma\gamma}$ (GeV)')
 plt.ylabel('Number of entries')
 plt.xticks([120, 140])
+plt.minorticks_on()
 plt.yticks(np.arange(0, 2200, 200))
 plt.legend()
 plt.show()
